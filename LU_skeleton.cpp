@@ -2,16 +2,21 @@
 #include <iomanip>
 #include <iostream>
 #include <fstream>
-#include <stdexcept>
-#include <string>
 #include <functional>
 #include <vector>
+#include <mutex>
+#include <thread>
+#include <condition_variable>
 
 using namespace std;
 using namespace std::chrono;
 
 class LU {
 	public:
+		std::mutex mutex;
+		int workerCount = 1;
+		std::condition_variable cv;
+		size_t worker = 0;
 		// It reads a matrix from the binary file.
 		void readMatrixFromInputFile(const string& inputFile)	{
 			ifstream bin(inputFile.c_str(), ifstream::in | ifstream::binary);
@@ -33,37 +38,8 @@ class LU {
 			high_resolution_clock::time_point start = high_resolution_clock::now();
 
             // LU decomposition
-            for (int k = 0; k < A.size(); ++k) {
-                for (int j = k; j < A.size(); ++j) {
-                    U[k][j] = A[k][j];
-                }
-                L[k][k] = 1;
-                for (int i = k + 1; i < A.size(); ++i) {
-                    L[i][k] = A[i][k]/U[k][k];
-                }
-                for (int i = k + 1; i < A.size(); ++i) {
-                    for (int j = k + 1; j < A.size(); ++j) {
-                        A[i][j] = A[i][j] - (L[i][k] * U[k][j]);
-                    }
-                }
-            }
-//            for (int i = 0; i < A.size(); ++i) {
-//                for (int j = 0; j < A.size(); ++j) {
-//                    if (i == j) {   // diagonal
-//                        L[i][j] = 1;
-//
-//                        computeU(i, j);
-//                    } else if (j > i) {  // upper triangle
-//                        L[i][j] = 0;
-//
-//                        computeU(i, j);
-//                    } else {    // lower triangle
-//                        U[i][j] = 0;
-//
-//                        computeL(i, j);
-//                    }
-//                }
-//            }
+			decompose_parallel();
+//            decompose_sequential();
 
 			double runtime = duration_cast<duration<double>>(high_resolution_clock::now()-start).count();
 
@@ -84,27 +60,81 @@ class LU {
 
 			bout.close();
 		}
-		
+		void barrier() {
+			std::unique_lock<std::mutex> lock{mutex};
+			worker++;
+			if (worker == workerCount) {
+				cv.notify_all();
+				worker = 0;
+			} else {
+				cv.wait(lock);
+			}
+		}
+
 	private:
 
 		vector<vector<double>> A, L, U;
 		friend ostream& operator<<(ostream&, const LU&);
-        void computeU(int i, int j) {
-            int sum = 0;
-            for (int r = 0; r < i; ++r) {
-                sum += (L[i][r] * U[r][j]);
+        void decompose_sequential() {
+            // TODO: handle division by zero by pivoting the A matrix
+            for (int k = 0; k < A.size(); ++k) {
+                for (int j = k; j < A.size(); ++j) {
+                    U[k][j] = A[k][j];
+                }
+                L[k][k] = 1;
+                for (int i = k + 1; i < A.size(); ++i) {
+                    L[i][k] = A[i][k] / U[k][k];
+                }
+                for (int i = k + 1; i < A.size(); ++i) {
+                    for (int j = k + 1; j < A.size(); ++j) {
+                        A[i][j] = A[i][j] - (L[i][k] * U[k][j]);
+                    }
+                }
             }
-            U[i][j] = A[i][j] - sum;
         }
-        void computeL(int i, int j) {
-            int sum = 0;
-            // TODO: j - 1?
-            for (int r = 0; r < j; ++r) {
-                sum += L[i][r] * U[r][j];
+		void decompose_parallel() {
+            workerCount = min(thread::hardware_concurrency(), (unsigned int) A.size());
+			vector<thread> workers;
+			for (int i = 0; i < workerCount; ++i) {
+				workers.emplace_back(&LU::decompose_parallel_job, this, i);
+			}
+			for (thread &worker : workers) {
+				worker.join();
+			}
+		}
+        double decompose_parallel_job(int threadId) {
+			int row_start = (threadId * A.size()) / workerCount;
+			int row_end = row_start + (A.size() / workerCount);
+
+            for (int k = 0; k < A.size(); ++k) {
+				for (int j = max(k, row_start); j < row_end; ++j) {
+					computeU(k, j);
+				}
+				barrier();
+				L[k][k] = 1;
+				for (int i = max(k, row_start); i < row_end; ++i) {
+					computeL(k, i);
+				}
+				barrier();
             }
-            // TODO: handle division by zero?
-            L[i][j] = 1/U[j][j] * (A[i][j] - sum);
+			return 0;
         }
+		void computeU(int k, int j) {
+			double sum = 0;
+			for (int r = 0; r < k; ++r) {
+				sum += (L[k][r] * U[r][j]);
+			}
+			U[k][j] = A[k][j] - sum;
+		}
+		void computeL(int j, int k) {
+			double sum = 0;
+			// TODO: j - 1?
+			for (int r = 0; r < j; ++r) {
+				sum += L[k][r] * U[r][j];
+			}
+			// TODO: handle division by zero?
+			L[k][j] = (1 / U[j][j]) * (A[k][j] - sum);
+		}
 };
 
 // Print the matrices A, L, and U in an instance of LU class.
