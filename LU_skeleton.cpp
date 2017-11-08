@@ -55,8 +55,16 @@ class LU {
 				uint64_t n = A.size();
 				for (uint64_t r = 0; r < n; ++r)
 					bout.write((char*) L[r].data(), n*sizeof(double));
-				for (uint64_t r = 0; r < n; ++r)
-					bout.write((char*) U[r].data(), n*sizeof(double));
+				for (uint64_t r = 0; r < n; ++r) {
+//                    double column[n];
+                    std::vector<double> column(n);
+                    for (uint64_t q = 0; q < n; ++q) {
+                        column[q] = U[q][r];
+                    }
+//                    cout << (char *) column.data() << endl;
+                    bout.write((char *) column.data(), n * sizeof(double));
+//                    bout.write((char *) U[r].data(), n * sizeof(double));
+                }
 			} else {
 				throw invalid_argument("Cannot open the input file!");
 			}
@@ -129,12 +137,12 @@ class LU {
 			int row_end = row_start + (A.size() / workerCount);
 
             for (int k = 0; k < A.size(); ++k) {
-				for (int j = max(k, row_start); j <= row_end; ++j) {
+				for (int j = max(k, row_start); j < row_end; ++j) {
 					computeU(k, j);
 				}
 				barrier();
 				L[k][k] = 1;
-				for (int i = max(k, row_start); i <= row_end; ++i) {
+				for (int i = max(k, row_start); i < row_end; ++i) {
                     if (i < A.size()) {
                         computeL(k, i);
                     }
@@ -146,15 +154,15 @@ class LU {
 		void computeU(int k, int j) {
             double sum = 0;
             for (int r = 0; r < k; ++r) {
-                sum += (L[k][r] * U[r][j]);
+                sum += (L[k][r] * U[j][r]);
             }
-            U[k][j] = A[k][j] - sum;
+            U[j][k] = A[k][j] - sum;
 		}
 		void computeL(int j, int k) {
 			double sum = 0;
 			// TODO: j - 1?
 			for (int r = 0; r < j; ++r) {
-				sum += L[k][r] * U[r][j];
+				sum += L[k][r] * U[j][r];
 			}
 			// TODO: handle division by zero?
 			L[k][j] = (1 / U[j][j]) * (A[k][j] - sum);
@@ -198,10 +206,12 @@ int main(int argc, char* argv[])	{
 	lu.readMatrixFromInputFile(inputFile);
 	double totalDuration = lu.decompose();
 	// Decomposition is printed only if the output file is not written.
-	if (outputFile.empty())
-		cout<<lu<<endl;
-	else
-		lu.writeResults(outputFile);
+	if (outputFile.empty()) {
+        cout << lu << endl;
+    } else {
+//        cout << lu << endl;
+        lu.writeResults(outputFile);
+    }
 
 	cout<<"computational time: "<<totalDuration<<" s"<<endl;
 
