@@ -137,12 +137,14 @@ class LU {
 			int row_end = row_start + (A.size() / workerCount);
 
             for (int k = 0; k < A.size(); ++k) {
-				for (int j = max(k, row_start); j < row_end; ++j) {
-					computeU(k, j);
+				for (int j = max(k, row_start); j <= row_end; ++j) {
+                    if (j < A.size()) {
+                        computeU(k, j);
+                    }
 				}
 				barrier();
 				L[k][k] = 1;
-				for (int i = max(k, row_start); i < row_end; ++i) {
+				for (int i = max(k, row_start); i <= row_end; ++i) {
                     if (i < A.size()) {
                         computeL(k, i);
                     }
