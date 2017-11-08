@@ -7,6 +7,7 @@
 #include <mutex>
 #include <thread>
 #include <condition_variable>
+#include <atomic>
 
 using namespace std;
 using namespace std::chrono;
@@ -17,6 +18,8 @@ class LU {
 		int workerCount = 1;
 		std::condition_variable cv;
 		size_t worker = 0;
+        std::atomic<int> atomic;
+        std::atomic<int> atomic2;
 		// It reads a matrix from the binary file.
 		void readMatrixFromInputFile(const string& inputFile)	{
 			ifstream bin(inputFile.c_str(), ifstream::in | ifstream::binary);
@@ -61,15 +64,32 @@ class LU {
 			bout.close();
 		}
 		void barrier() {
-			std::unique_lock<std::mutex> lock{mutex};
-			worker++;
-			if (worker == workerCount) {
-				cv.notify_all();
-				worker = 0;
-			} else {
-				cv.wait(lock);
-			}
+//			std::unique_lock<std::mutex> lock{mutex};
+//			worker++;
+//			if (worker == workerCount) {
+//				cv.notify_all();
+//				worker = 0;
+//			} else {
+//				cv.wait(lock);
+//			}
+
+            atomic++;
+            while (atomic < workerCount) {
+            }
+            atomic++;
+            if (atomic == (2 * workerCount)) {
+                atomic = 0;
+            }
 		}
+    void barrier2() {
+        atomic2++;
+        while (atomic2 < workerCount) {
+        }
+        atomic2++;
+        if (atomic2 == (2 * workerCount)) {
+            atomic2 = 0;
+        }
+    }
 
 	private:
 
@@ -93,6 +113,8 @@ class LU {
             }
         }
 		void decompose_parallel() {
+            atomic = 0;
+            atomic2 = 0;
             workerCount = min(thread::hardware_concurrency(), (unsigned int) A.size());
 			vector<thread> workers;
 			for (int i = 0; i < workerCount; ++i) {
@@ -117,7 +139,7 @@ class LU {
                         computeL(k, i);
                     }
 				}
-				barrier();
+				barrier2();
             }
 			return 0;
         }
